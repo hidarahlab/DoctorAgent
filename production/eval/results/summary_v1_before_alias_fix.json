@@ -1,0 +1,63 @@
+{
+ "summary": {
+  "n_questions": 27,
+  "intent_accuracy": 1.0,
+  "retrieval_hit_at_5": 0.947,
+  "retrieval_mrr": 0.947,
+  "in_book_answer_rate": 0.947,
+  "out_of_book_escalation_rate": 1.0,
+  "overall_outcome_accuracy": 0.963,
+  "faithfulness": 0.95,
+  "completeness": 0.898,
+  "relevance": 0.949,
+  "tone": 0.936,
+  "confidence_in_book": 0.934,
+  "confidence_out_of_book": 0.4,
+  "revision_rate": 0.368,
+  "requery_rate": 0.217,
+  "citation_validity": 1.0,
+  "avg_latency_s": 15.39,
+  "p90_latency_s": 23.32,
+  "avg_cost_usd": 0.0469,
+  "avg_cost_medical_usd": 0.0551,
+  "total_cost_usd": 1.2674
+ },
+ "ablation": [
+  {
+   "query": "raw question",
+   "retriever": "dense",
+   "hit_at_5": 0.737,
+   "mrr": 0.629
+  },
+  {
+   "query": "raw question",
+   "retriever": "sparse",
+   "hit_at_5": 0.737,
+   "mrr": 0.649
+  },
+  {
+   "query": "raw question",
+   "retriever": "hybrid",
+   "hit_at_5": 0.684,
+   "mrr": 0.684
+  },
+  {
+   "query": "planner rewrite",
+   "retriever": "dense",
+   "hit_at_5": 1.0,
+   "mrr": 1.0
+  },
+  {
+   "query": "planner rewrite",
+   "retriever": "sparse",
+   "hit_at_5": 1.0,
+   "mrr": 0.939
+  },
+  {
+   "query": "planner rewrite",
+   "retriever": "hybrid",
+   "hit_at_5": 0.947,
+   "mrr": 0.947
+  }
+ ]
+}

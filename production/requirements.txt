@@ -1,0 +1,12 @@
+# Python 3.11+ (developed on 3.12)
+anthropic==2.7.0        # Claude API (all four agents)
+streamlit==1.67.0       # web UI
+pymupdf==2.1            # PDF parsing (font-aware ingestion)
+fastembed==0.9.1        # local embeddings (BAAI/bge-small-en-v1.5, ONNX, CPU)
+faiss-cpu==1.15.1       # vector index
+rank-bm25==0.2.2        # keyword search
+numpy==2.5.4
+pydantic==2.14.3        # structured outputs for Planner / Evaluator
+python-dotenv==1.2.4    # loads ANTHROPIC_API_KEY from .env
+pandas==3.1.1
+pytest==9.2.0           # offline unit tests

@@ -1,0 +1,14 @@
+# Rahasia - jangan pernah di-commit
+.env
+
+# Environment Python
+.venv/
+__pycache__/
+*.pyc
+
+# File hasil generate (bisa dibuat ulang)
+index/
+.models/
+.pytest_cache/
+.DS_Store
+dist/
