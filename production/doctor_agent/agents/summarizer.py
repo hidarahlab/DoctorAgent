@@ -39,7 +39,7 @@ class SummarizerAgent:
 
     def for_user(self, memory: Memory, language: str) -> tuple[str, Usage]:
         if not memory.turns:
-            return "", None  # nothing to summarise
+            return "", None
         content = _transcript(memory, memory.unsummarized() or memory.recent())
         return self.llm.text(self.name, USER_SYSTEM.format(language=language),
                              [{"role": "user", "content": content}])

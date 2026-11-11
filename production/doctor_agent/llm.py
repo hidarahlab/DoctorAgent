@@ -18,9 +18,6 @@ from config import EFFORT, MAX_TOKENS, MODELS, PRICES
 
 T = TypeVar("T", bound=BaseModel)
 
-# Opus 5.5 supports server-side refusal fallbacks: if a safety classifier
-# wrongly declines a (legitimate) medical question, the API retries it on a
-# fallback model inside the same call instead of failing.
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
 FALLBACK_MODELS = {"claude-opus-5-5"}
 

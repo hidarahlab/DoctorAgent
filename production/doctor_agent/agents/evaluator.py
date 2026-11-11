@@ -70,5 +70,5 @@ def confidence(ev: Evaluation) -> float:
     clamp = lambda x: max(0.0, min(1.0, float(x)))
     score = sum(w * clamp(getattr(ev, k)) for k, w in CONFIDENCE_WEIGHTS.items())
     if ev.verdict == "insufficient_context":
-        score = min(score, 0.4)  # never "confident" when the book lacks the answer
+        score = min(score, 0.4)
     return round(score, 3)

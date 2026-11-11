@@ -1,14 +1,3 @@
-"""Step 1 - Ingestion: turn the Medical Book PDF into structure-aware chunks.
-
-The book (Gale Encyclopedia of Medicine, vol. 1, A-B) has a very regular layout:
-    ENTRY TITLE (15pt bold)  ->  Section heading (11pt bold)  ->  body text
-so instead of cutting the text blindly every N characters we read the font
-size/weight of every text block and cut along the book's own structure.
-Every chunk therefore knows which entry + section + page it came from, which
-we later show to the user as a citation.
-
-Run:  python -m doctor_agent.ingest
-"""
 from __future__ import annotations
 
 import json
@@ -32,7 +21,6 @@ class Section:
 
 
 def _block_kind(spans: list[dict]) -> str:
-    """Classify a text block by the font of its first span."""
     s0 = spans[0]
     size, font, text = round(s0["size"], 1), s0["font"], s0["text"].strip()
     if size == 15.0 and "Bold" in font:
@@ -40,27 +28,26 @@ def _block_kind(spans: list[dict]) -> str:
     if size == 12.5 and text.upper().startswith("KEY TERMS"):
         return "keyterms_header"
     if size == 12.0:
-        return "crossref"  # "Abrasions see Wounds"
+        return "crossref"
     if size == 11.0 and "Bold" in font:
         return "section"
     if size == 10.0 and font == "Optima-Bold" and text == "Resources":
         return "resources"
     if size == 10.0 and font == "Optima-Bold":
-        return "keyterm"  # "Term - definition" inside the KEY TERMS box
+        return "keyterm"
     if size <= 9.0:
-        return "small"  # bibliography / captions
+        return "small"
     return "body"
 
 
 def _page_blocks(page: pymupdf.Page):
-    """Yield (kind, lines) for content blocks in reading order (2 columns)."""
     w, h = page.rect.width, page.rect.height
     blocks = []
     for b in page.get_text("dict")["blocks"]:
         if "lines" not in b:
             continue
         x0, y0, x1, _ = b["bbox"]
-        if y0 > h * 0.91 or x1 < 60 or x0 > w - 60:  # footer / margin header
+        if y0 > h * 0.91 or x1 < 60 or x0 > w - 60:
             continue
         spans = [s for l in b["lines"] for s in l["spans"] if s["text"].strip()]
         if not spans:
@@ -69,8 +56,6 @@ def _page_blocks(page: pymupdf.Page):
         col = 0 if x0 < w / 2 - 10 else 1
         kind = _block_kind(spans)
         if kind in ("entry", "section"):
-            # A heading and the paragraph after it sometimes share one block:
-            # keep only the heading-sized lines as heading, re-classify the rest.
             head = round(spans[0]["size"], 1)
             sizes = [
                 next((round(s["size"], 1) for s in l["spans"] if s["text"].strip()), head)
@@ -83,13 +68,12 @@ def _page_blocks(page: pymupdf.Page):
                 blocks.append((col, y0 + 0.1, _block_kind(rest), lines[n:]))
                 continue
         blocks.append((col, y0, kind, lines))
-    blocks.sort(key=lambda t: (t[0], t[1]))  # left column first, then top-down
+    blocks.sort(key=lambda t: (t[0], t[1]))
     for _, _, kind, lines in blocks:
         yield kind, lines
 
 
 def _join_lines(lines: list[str]) -> str:
-    """Join PDF lines, repairing end-of-line hyphenation ("vacu-" + "um")."""
     out = ""
     for ln in lines:
         ln = re.sub(r"\s+", " ", ln).strip()
@@ -103,7 +87,6 @@ def _join_lines(lines: list[str]) -> str:
 
 
 def _book_page(page: pymupdf.Page) -> str:
-    """The printed page number (10.1pt digits) - nicer to cite than the PDF index."""
     for b in page.get_text("dict")["blocks"]:
         for l in b.get("lines", []):
             for s in l["spans"]:
@@ -118,7 +101,7 @@ def parse_sections(pdf_path: Path = PDF_PATH) -> tuple[list[Section], dict[str, 
     aliases: dict[str, str] = {}
     cur: Section | None = None
     keyterms: Section | None = None
-    entry, mode = "", "body"  # mode: body (keep text) | skip (bibliography)
+    entry, mode = "", "body"
     pending_title: list[str] = []
     crossref_buf: list[str] = []
 
@@ -133,7 +116,6 @@ def parse_sections(pdf_path: Path = PDF_PATH) -> tuple[list[Section], dict[str, 
         for kind, lines in _page_blocks(page):
             text = _join_lines(lines)
             if kind != "entry" and pending_title:
-                # entry titles can wrap over several blocks - close the title now
                 entry = " ".join(pending_title)
                 pending_title = []
                 cur, keyterms, mode = start("Overview", pno, bp), None, "body"
@@ -156,7 +138,6 @@ def parse_sections(pdf_path: Path = PDF_PATH) -> tuple[list[Section], dict[str, 
             elif kind == "body" and mode == "body" and cur is not None:
                 cur.lines.append(text)
 
-    # Cross references: "Abrasions see Wounds Abruptio placentae see Placental abruption"
     joined = " ".join(crossref_buf)
     for m in re.finditer(r"(.+?)\s+see\s+(.+?)(?=\s+[A-Z][\w,'’\- ]*?\s+see\s+|$)", joined):
         aliases[m.group(1).strip()] = m.group(2).strip()
@@ -168,8 +149,8 @@ def split_text(text: str, size: int = CHUNK_CHARS, overlap: int = OVERLAP_CHARS)
     if len(text) <= size:
         return [text]
     sents = []
-    for s in re.split(r"(?<=[.!?])\s+|\s(?=• )", text):  # sentences and bullet items
-        while len(s) > size:  # very long run-on: hard split on a word boundary
+    for s in re.split(r"(?<=[.!?])\s+|\s(?=• )", text):
+        while len(s) > size:
             cut = s.rfind(" ", 0, size)
             cut = cut if cut > 0 else size
             sents.append(s[:cut])
@@ -179,7 +160,7 @@ def split_text(text: str, size: int = CHUNK_CHARS, overlap: int = OVERLAP_CHARS)
     for s in sents:
         if buf and len(buf) + len(s) > size:
             chunks.append(buf.strip())
-            buf = buf[-overlap:].split(" ", 1)[-1] + " "  # overlap on word boundary
+            buf = buf[-overlap:].split(" ", 1)[-1] + " "
         buf += s + " "
     if buf.strip():
         chunks.append(buf.strip())

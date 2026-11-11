@@ -17,7 +17,6 @@ from doctor_agent.orchestrator import DoctorAgentSystem
 from doctor_agent.retriever import Hit
 
 
-# ------------------------------------------------------------------ chunking
 def test_split_short_text_is_one_chunk():
     assert split_text("Short text.", size=100) == ["Short text."]
 
@@ -27,11 +26,9 @@ def test_split_respects_size_and_overlaps():
     parts = split_text(text, size=300, overlap=60)
     assert len(parts) > 5
     assert all(len(p) <= 300 + 60 for p in parts)
-    # consecutive chunks share some words (overlap)
     assert set(parts[0].split()[-5:]) & set(parts[1].split()[:15])
 
 
-# ------------------------------------------------------------------ evaluator scoring
 def _ev(**kw) -> Evaluation:
     base = dict(faithfulness=1, completeness=1, relevance=1, tone=1, unsupported_claims=[],
                 missing_points=[], verdict="pass", revised_answer="", suggested_query="", feedback="ok")
@@ -53,11 +50,10 @@ def test_strict_schema_requires_all_fields():
     assert set(schema["required"]) == set(Evaluation.model_fields)
 
 
-# ------------------------------------------------------------------ planner policy
 @pytest.mark.parametrize("verdict,conf,attempt,expected", [
     ("pass", 0.90, 1, "accept"),
     ("revise", 0.60, 1, "requery"),
-    ("revise", 0.60, MAX_ATTEMPTS, "accept"),      # mid confidence, no retries left -> warn
+    ("revise", 0.60, MAX_ATTEMPTS, "accept"),
     ("revise", 0.30, MAX_ATTEMPTS, "escalate"),
     ("insufficient_context", 0.30, 1, "requery"),
     ("insufficient_context", 0.30, MAX_ATTEMPTS, "escalate"),
@@ -66,7 +62,6 @@ def test_planner_policy(verdict, conf, attempt, expected):
     assert PlannerAgent.after_evaluation(verdict, conf, attempt).action == expected
 
 
-# ------------------------------------------------------------------ orchestration (fake LLM)
 class FakeLLM:
     """Returns scripted outputs per agent, in order."""
 
@@ -104,6 +99,13 @@ def test_accept_path():
     assert llm.calls == ["planner", "rag", "evaluator"]
 
 
+def test_progress_reports_each_agent_before_it_runs():
+    llm = FakeLLM({"planner": [plan()], "rag": ["Sebum clogs pores [1]."], "evaluator": [_ev()]})
+    seen = []
+    DoctorAgentSystem(llm, FakeRetriever()).ask("What causes acne?", Memory(), on_progress=seen.append)
+    assert seen == ["planner", "rag", "evaluator"]
+
+
 def test_revised_answer_replaces_original():
     ev = _ev(verdict="revise", revised_answer="Corrected [1].", unsupported_claims=["made up"])
     llm = FakeLLM({"planner": [plan()], "rag": ["Wrong claim."], "evaluator": [ev]})
@@ -136,13 +138,12 @@ def test_summarizer_runs_every_n_turns():
     assert llm.calls.count("summarizer") == 1
 
 
-# ------------------------------------------------------------------ real retrieval (needs built index)
 @pytest.mark.skipif(not (INDEX_DIR / "chunks.faiss").exists(), reason="index not built")
 @pytest.mark.parametrize("query,entry", [
     ("What causes acne?", "Acne"),
     ("treatment for bronchitis", "Bronchitis"),
     ("side effects of acetaminophen", "Acetaminophen"),
-    ("Bell's palsy prognosis", "Bell’s palsy"),  # regression: alias "ALS" used to match inside "palsy"
+    ("Bell's palsy prognosis", "Bell’s palsy"),
 ])
 def test_retrieval_finds_right_entry(query, entry):
     from doctor_agent.retriever import HybridRetriever

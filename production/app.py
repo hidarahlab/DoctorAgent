@@ -1,34 +1,25 @@
-"""Doctor Agent - Streamlit UI for the multi-agent Medical Book assistant.
-
-Run:  streamlit run app.py
-"""
 import os
 
 import streamlit as st
 
 from config import ACCEPT_THRESHOLD, MODELS
 from doctor_agent.memory import Memory
-from doctor_agent.orchestrator import DoctorAgentSystem, Step, TurnResult
+from doctor_agent.orchestrator import DoctorAgentSystem, TurnResult
 
 st.set_page_config(page_title="Doctor Agent", page_icon="🩺", layout="wide")
 
+st.html("""<style>
+[data-testid="stAppDeployButton"], [data-testid="stStatusWidget"],
+[data-testid="stMainMenuItem-rerun"], [data-testid="stMainMenuItem-autoRerun"],
+[data-testid="stMainMenuItem-print"], [data-testid="stMainMenuItem-recordScreencast"],
+[data-testid="stMainMenuDivider"], [data-testid="stMainMenuList"] ~ div { display: none !important; }
+[data-testid="stChatInput"] > div { background-color: #FFFFFF !important; }  /* white chat box, keep border */
+</style>""")
+
 AGENT_ICON = {"planner": "🧭", "rag": "📚", "evaluator": "🔍", "summarizer": "📝", "system": "⚙️"}
-AGENT_ROLE = {
-    "planner": "Classifies intent, rewrites the query, decides accept / re-query / escalate",
-    "rag": "Hybrid retrieval (FAISS + BM25) and a grounded, cited answer",
-    "evaluator": "Fact-checks the answer, scores it, revises if needed",
-    "summarizer": "Keeps a running conversation summary as memory",
-}
-EXAMPLES = [
-    "What causes acne?",
-    "Apa saja gejala bronkitis?",
-    "Bagaimana cara mengobatinya?",
-    "How is malaria treated?",
-    "Rangkum percakapan kita",
-]
+AGENT_LABEL = {"planner": "Planner", "rag": "RAG", "evaluator": "Evaluator", "summarizer": "Summarizer"}
 
 
-# ------------------------------------------------------------------ state
 @st.cache_resource(show_spinner="Loading Medical Book index...")
 def load_system() -> DoctorAgentSystem:
     return DoctorAgentSystem()
@@ -36,17 +27,15 @@ def load_system() -> DoctorAgentSystem:
 
 def init_state() -> None:
     st.session_state.setdefault("memory", Memory())
-    st.session_state.setdefault("messages", [])  # {"role", "content", "result"}
-    st.session_state.setdefault("total_cost", 0.0)
-    st.session_state.setdefault("total_tokens", 0)
+    st.session_state.setdefault("messages", [])
 
 
 def reset() -> None:
-    for k in ("memory", "messages", "total_cost", "total_tokens"):
+    for k in ("memory", "messages"):
         st.session_state.pop(k, None)
 
 
-# ------------------------------------------------------------------ rendering helpers
+
 def confidence_badges(r: TurnResult) -> str:
     badges = []
     if r.confidence is not None:
@@ -58,14 +47,13 @@ def confidence_badges(r: TurnResult) -> str:
         badges.append(":violet-badge[Revised by Evaluator]")
     if r.attempts > 1:
         badges.append(f":blue-badge[Re-queried ×{r.attempts - 1}]")
-    badges.append(f":gray-badge[{r.intent.replace('_', ' ')}]")
-    tin, tout = r.tokens
-    badges.append(f":gray-badge[{r.seconds:.1f}s · {tin + tout:,} tokens · ${r.cost:.4f}]")
     return " ".join(badges)
 
 
 def render_details(r: TurnResult) -> None:
-    st.markdown(confidence_badges(r))
+    badges = confidence_badges(r)
+    if badges:
+        st.markdown(badges)
     if r.evaluation is not None:
         ev = r.evaluation
         with st.expander(f"🔍 Evaluator feedback — verdict: **{ev.verdict}**"):
@@ -101,30 +89,22 @@ def render_details(r: TurnResult) -> None:
 def sidebar() -> None:
     with st.sidebar:
         st.header("🩺 Doctor Agent")
-        st.caption("Multi-agent RAG assistant over the **Medical Book** "
-                   "(Gale Encyclopedia of Medicine, vol. 1 — topics A–B).")
+        st.caption("Multi-agent RAG assistant")
         st.subheader("Agents")
-        for name, model in MODELS.items():
-            st.markdown(f"{AGENT_ICON[name]} **{name.capitalize()}** · `{model}`")
-            st.caption(AGENT_ROLE[name])
-        st.subheader("Session")
-        c1, c2 = st.columns(2)
-        c1.metric("Questions", sum(m["role"] == "user" for m in st.session_state.messages))
-        c2.metric("Cost", f"${st.session_state.total_cost:.3f}")
-        st.caption(f"{st.session_state.total_tokens:,} tokens used")
+        rows = "".join(
+            f'<div style="margin-bottom:5px">&gt; <b>{name.capitalize()}</b> · <code>{model}</code></div>'
+            for name, model in MODELS.items()
+        )
+        st.markdown(rows, unsafe_allow_html=True)
         st.subheader("Memory (Summarizer)")
         st.caption(st.session_state.memory.summary or "No summary yet — created every 3 turns.")
         st.button("🗑️ Clear conversation", on_click=reset, width="stretch")
-        st.caption("⚠️ Educational tool, not a substitute for professional medical advice.")
 
-
-# ------------------------------------------------------------------ main
 init_state()
 sidebar()
 
 st.title("🩺 Doctor Agent")
-st.caption("Ask a medical question in English or Indonesian. Four agents collaborate: "
-           "Planner → RAG → Evaluator → Summarizer.")
+st.caption("Ask a medical question")
 
 if not os.environ.get("ANTHROPIC_API_KEY"):
     st.error("ANTHROPIC_API_KEY is not set. Copy `.env.example` to `.env` and add your key, then restart.")
@@ -138,37 +118,25 @@ for m in st.session_state.messages:
         if m.get("result"):
             render_details(m["result"])
 
-if not st.session_state.messages:
-    st.markdown("**Try one of these:**")
-    cols = st.columns(len(EXAMPLES))
-    for col, ex in zip(cols, EXAMPLES):
-        if col.button(ex, width="stretch"):
-            st.session_state.pending = ex
-            st.rerun()
-
-prompt = st.chat_input("Ask about a disease, symptom, test or treatment...") or st.session_state.pop("pending", None)
+prompt = st.chat_input("Try chat")
 if prompt:
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
     with st.chat_message("assistant", avatar="🩺"):
-        with st.status("Agents are working...", expanded=True) as status:
-            def on_step(s: Step) -> None:
-                st.write(f"{AGENT_ICON.get(s.agent, '')} **{s.agent.capitalize()}** — {s.action}")
-
-            try:
-                result = system.ask(prompt, st.session_state.memory, on_step=on_step)
-            except Exception as e:  # show API / network errors instead of crashing the app
-                status.update(label="Something went wrong", state="error")
-                st.error(f"{type(e).__name__}: {e}")
-                st.session_state.messages.pop()
-                st.stop()
-            status.update(label=f"Done in {result.seconds:.1f}s", state="complete", expanded=False)
+        progress = st.empty()
+        try:
+            result = system.ask(prompt, st.session_state.memory,
+                                on_progress=lambda agent: progress.caption(f"⏳ {AGENT_LABEL[agent]} berjalan..."))
+        except Exception as e:
+            progress.empty()
+            st.error(f"{type(e).__name__}: {e}")
+            st.session_state.messages.pop()
+            st.stop()
+        progress.empty()
         st.markdown(result.answer)
         render_details(result)
 
     st.session_state.messages.append({"role": "assistant", "content": result.answer, "result": result})
-    st.session_state.total_cost += result.cost
-    st.session_state.total_tokens += sum(result.tokens)
-    st.rerun()  # refresh sidebar counters
+    st.rerun()

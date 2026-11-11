@@ -1,12 +1,3 @@
-"""Step 2 - Hybrid retrieval: dense vectors (FAISS) + keyword search (BM25).
-
-Why hybrid?  Dense embeddings understand meaning ("high blood pressure" ~
-"hypertension"), but medical text is full of exact technical terms and drug
-names where plain keyword matching is more reliable.  We run both and merge
-their rankings with Reciprocal Rank Fusion (RRF):  score = sum 1 / (k + rank).
-
-Build the index once:  python -m doctor_agent.retriever
-"""
 from __future__ import annotations
 
 import json
@@ -31,15 +22,14 @@ def tokenize(text: str) -> list[str]:
 
 
 def chunk_to_passage(c: dict) -> str:
-    """Text that gets embedded: prefix with entry + section so the vector knows the topic."""
     return f"{c['entry']} - {c['section']}: {c['text']}"
 
 
 @dataclass
 class Hit:
     chunk: dict
-    score: float      # fused RRF score (used for ranking)
-    dense_sim: float  # cosine similarity with the query (0..1, used as a signal)
+    score: float
+    dense_sim: float
 
 
 class HybridRetriever:
@@ -51,10 +41,9 @@ class HybridRetriever:
         self.embedder = embedder
         self.bm25 = BM25Okapi([tokenize(chunk_to_passage(c)) for c in chunks])
 
-    # ------------------------------------------------------------ build / load
     @staticmethod
     def _embedder():
-        from fastembed import TextEmbedding  # imported lazily: slow-ish import
+        from fastembed import TextEmbedding
         return TextEmbedding(model_name=EMBED_MODEL, cache_dir=str(EMBED_CACHE))
 
     @classmethod
@@ -63,8 +52,8 @@ class HybridRetriever:
         chunks, aliases = data["chunks"], data["aliases"]
         embedder = cls._embedder()
         vecs = np.array(list(embedder.passage_embed([chunk_to_passage(c) for c in chunks])), dtype="float32")
-        faiss.normalize_L2(vecs)                 # cosine similarity == inner product
-        index = faiss.IndexFlatIP(vecs.shape[1])  # exact search; 3.3k vectors is tiny
+        faiss.normalize_L2(vecs)
+        index = faiss.IndexFlatIP(vecs.shape[1])
         index.add(vecs)
         INDEX_DIR.mkdir(exist_ok=True)
         faiss.write_index(index, str(INDEX_DIR / "chunks.faiss"))
@@ -78,29 +67,22 @@ class HybridRetriever:
         data = json.loads(CHUNKS_PATH.read_text())
         return cls(data["chunks"], data["aliases"], faiss.read_index(str(path)), cls._embedder())
 
-    # ------------------------------------------------------------ search
     def _expand(self, query: str) -> str:
-        """Resolve the book's cross references ("Abdominal hernia see Hernia")."""
         q = query.lower()
-        # whole-word match only: a plain substring test made "ALS" fire inside "palsy"
         extra = [target for alias, target in self.aliases.items() if re.search(rf"\b{re.escape(alias)}\b", q)]
         return query + (" " + " ".join(extra) if extra else "")
 
     def search(self, query: str, k: int = TOP_K, mode: str = "hybrid") -> list[Hit]:
-        """mode: 'hybrid' (default), 'dense' or 'sparse' - the last two exist for the ablation study."""
         query = self._expand(query)
 
-        # dense ranking
         qv = np.array(list(self.embedder.query_embed(query)), dtype="float32")
         faiss.normalize_L2(qv)
         sims, ids = self.index.search(qv, CANDIDATES)
         dense = {int(i): float(s) for i, s in zip(ids[0], sims[0]) if i >= 0}
 
-        # keyword ranking
         bm = self.bm25.get_scores(tokenize(query))
         sparse = [int(i) for i in np.argsort(bm)[::-1][:CANDIDATES] if bm[i] > 0]
 
-        # reciprocal rank fusion
         fused: dict[int, float] = {}
         if mode in ("hybrid", "dense"):
             for rank, i in enumerate(dense):
@@ -109,7 +91,6 @@ class HybridRetriever:
             for rank, i in enumerate(sparse):
                 fused[i] = fused.get(i, 0) + 1 / (RRF_K + rank + 1)
 
-        # small boost when the query names an entry title exactly ("acne", "bursitis")
         ql = query.lower()
         for i in (fused if mode == "hybrid" else []):
             entry = self.chunks[i]["entry"].lower()
@@ -118,7 +99,7 @@ class HybridRetriever:
 
         best = sorted(fused, key=fused.get, reverse=True)[:k]
         missing = [i for i in best if i not in dense]
-        if missing:  # cosine sim for BM25-only hits, so every hit has a comparable signal
+        if missing:
             vecs = np.vstack([self.index.reconstruct(i) for i in missing])
             for i, s in zip(missing, (vecs @ qv[0]).tolist()):
                 dense[i] = s

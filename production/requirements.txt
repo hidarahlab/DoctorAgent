@@ -8,5 +8,4 @@ rank-bm25==0.2.2        # keyword search
 numpy==2.5.4
 pydantic==2.14.3        # structured outputs for Planner / Evaluator
 python-dotenv==1.2.4    # loads ANTHROPIC_API_KEY from .env
-pandas==3.1.1
 pytest==9.2.0           # offline unit tests

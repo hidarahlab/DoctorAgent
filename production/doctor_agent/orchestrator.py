@@ -95,7 +95,10 @@ class DoctorAgentSystem:
         self.evaluator = EvaluatorAgent(self.llm)
         self.summarizer = SummarizerAgent(self.llm)
 
-    def ask(self, message: str, memory: Memory, on_step: Callable[[Step], None] | None = None) -> TurnResult:
+    def ask(self, message: str, memory: Memory, on_step: Callable[[Step], None] | None = None,
+            on_progress: Callable[[str], None] | None = None) -> TurnResult:
+        """on_step: called AFTER each agent call (for the trace).
+        on_progress: called with the agent name just BEFORE it starts (for a live "X is running" label)."""
         t0 = time.perf_counter()
         steps: list[Step] = []
 
@@ -104,7 +107,11 @@ class DoctorAgentSystem:
             if on_step:
                 on_step(step)
 
-        # 1. Planner decides what to do -------------------------------------------
+        def progress(agent: str) -> None:
+            if on_progress:
+                on_progress(agent)
+
+        progress("planner")
         plan, u = self.planner.plan(message, memory)
         route = self.planner.route(plan)
         log(Step.from_usage(u, f"intent = {plan.intent}",
@@ -116,28 +123,30 @@ class DoctorAgentSystem:
             result.answer = plan.direct_reply
             result.escalated = plan.intent == "emergency"
         elif plan.intent == "summary_request":
+            progress("summarizer")
             text, u = self.summarizer.for_user(memory, plan.language)
             log(Step.from_usage(u, "recap for user"))
             result.answer = text or ("Belum ada percakapan untuk dirangkum." if _is_indonesian(plan.language)
                                      else "There is no conversation to summarise yet.")
         else:
-            self._answer_medical(message, plan, memory, result, log)
+            self._answer_medical(message, plan, memory, result, log, progress)
 
-        # 2. Memory + periodic summarisation ---------------------------------------
         memory.add(message, result.answer)
         if self.planner.should_summarize(memory):
+            progress("summarizer")
             u = self.summarizer.update(memory)
             log(Step.from_usage(u, "memory updated", memory.summary[:160]))
 
         result.seconds = time.perf_counter() - t0
         return result
 
-    def _answer_medical(self, message: str, plan: Plan, memory: Memory, result: TurnResult, log) -> None:
+    def _answer_medical(self, message: str, plan: Plan, memory: Memory, result: TurnResult, log, progress) -> None:
         query, feedback = plan.search_query or message, ""
-        best = None  # (confidence, final_answer, evaluation, hits, revised)
+        best = None
 
         for attempt in range(1, MAX_ATTEMPTS + 1):
             result.attempts = attempt
+            progress("rag")
             try:
                 rag = self.rag.run(message, query, plan.language, memory, feedback)
             except LLMRefusal as e:
@@ -147,6 +156,7 @@ class DoctorAgentSystem:
             log(Step.from_usage(rag.usage, f"attempt {attempt}: answered",
                                 f"query: {query} | top sim {rag.top_similarity:.2f} | sources: {sources}"))
 
+            progress("evaluator")
             ev, conf, u = self.evaluator.run(message, rag.answer, rag.hits, plan.language)
             log(Step.from_usage(u, f"verdict = {ev.verdict}, confidence = {conf:.2f}",
                                 f"F {ev.faithfulness:.2f} · C {ev.completeness:.2f} · R {ev.relevance:.2f} · "
@@ -161,17 +171,15 @@ class DoctorAgentSystem:
             log(Step("planner", f"decision = {decision.action}", decision.reason))
             if decision.action != "requery":
                 break
-            # re-query: use the Evaluator's suggested query and tell RAG what went wrong
             query = ev.suggested_query.strip() or f"{plan.search_query} {message}"
             feedback = "; ".join(ev.unsupported_claims + [f"missing: {m}" for m in ev.missing_points]) or ev.feedback
 
-        if best is None:  # the model refused on the first attempt
+        if best is None:
             result.answer, result.escalated = escalation_message(plan.language), True
             return
 
         conf, answer, ev, hits, revised = best
         result.confidence, result.evaluation, result.sources, result.revised = conf, ev, hits, revised
-        # final call is made on the BEST attempt, with no retries left
         final = self.planner.after_evaluation(ev.verdict, conf, MAX_ATTEMPTS)
         if result.attempts > 1:
             log(Step("planner", f"final = {final.action}", f"best attempt: {final.reason}"))

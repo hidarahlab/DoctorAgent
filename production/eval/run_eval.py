@@ -25,8 +25,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from doctor_agent.memory import Memory  # noqa: E402
-from doctor_agent.orchestrator import DoctorAgentSystem  # noqa: E402
+from doctor_agent.memory import Memory
+from doctor_agent.orchestrator import DoctorAgentSystem
 
 QUESTIONS = Path(__file__).parent / "questions.json"
 OUT = Path(__file__).parent / "results"

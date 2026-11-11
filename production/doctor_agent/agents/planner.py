@@ -65,7 +65,6 @@ class PlannerAgent:
     def __init__(self, llm: LLM):
         self.llm = llm
 
-    # ------------------------------------------------------------ 1. plan
     def plan(self, message: str, memory: Memory) -> tuple[Plan, Usage]:
         prompt = f"{memory.context()}\n\nLatest user message:\n{message}"
         return self.llm.json(self.name, SYSTEM, [{"role": "user", "content": prompt}], Plan)
@@ -82,7 +81,6 @@ class PlannerAgent:
             "emergency": [],
         }[plan.intent]
 
-    # ------------------------------------------------------------ 2. decide
     @staticmethod
     def after_evaluation(verdict: str, confidence: float, attempt: int) -> Decision:
         can_retry = attempt < MAX_ATTEMPTS
